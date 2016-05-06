@@ -1,12 +1,694 @@
-<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 2.0//EN">
-<HTML>
-   <HEAD>
-      <TITLE>
-         A Small Hello 
-      </TITLE>
-   </HEAD>
-<BODY>
-   <H1>Hi</H1>
-   <P>This is very minimal "hello world" HTML document.</P> 
-</BODY>
-</HTML>
+<!DOCTYPE html>
+<html>
+<title>Playground</title>
+<link rel="stylesheet" type="text/css" href="playground.css" />
+<body>
+
+<!-- Load the Threejs package -->
+<script src="js/three.js"></script>
+<!-- Load the Trackball Controls package -->
+<script src="js/TrackballControls.js"></script>
+<!-- Load the Orbits package -->
+<script src="js/OrbitControls.js"></script>
+<!-- Load the ThreeBSP package with constructive solid geometry -->
+<script src="js/ThreeBSP.js"></script>
+<!-- Load the OBJLoader package -->
+<script src="js/OBJLoader.js"></script>
+<!-- Load the MeshLabCppCore package -->
+<script src = "js/MeshLabCppCore.js"></script>
+<!-- Load the meshlab package -->
+<script src="js/meshlab.js"></script> 
+<!-- Load the exportOBJ package -->
+<script src="js/exportOBJ.js"></script> 
+
+
+<script>
+// create global variables for each necessary object
+var camera, controls, scene, renderer;
+// objects in the scene
+var objects = [], plane;
+// meshes in the scene
+var meshes = [];
+// selected objects and csg objects in the scene
+var selectedObjects = [], csgObjects = [];
+// mouse coordinates in the scene
+var mouse = { x: 0, y: 0 };
+
+// raycaster to detect interseciton between mouse and objects
+var raycaster = new THREE.Raycaster();
+// mouse in the scene
+var mouse = new THREE.Vector2(),
+// vector for move location of the plane
+offset = new THREE.Vector3(),
+INTERSECTED, SELECTED, EVENT;
+// Rotate an object around an arbitrary axis in object space
+var rotObjectMatrix;
+// all objects will be this color (turquoise-ish)
+var baseColor = 0x00dd99;
+// highlighted objects will be emissive red
+var highlightedColor = 0xff0000;
+
+//initialize and animate the scene
+init();
+animate();
+
+
+
+/*
+* Initializing the scene 
+* Setting up the camera, light, and rendereing the scene 
+ */
+function init() {
+    // create <div> tag within html document
+    container = document.createElement( 'div' );
+    // add the <div> object to the body of the html page
+    document.body.appendChild( container );
+
+    // create a new orthographic camera, zoom in and out from focal point, 10000 is farthest object to render
+    camera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 1, 10000 );
+    camera.position.z = 1000;
+
+    // create new TrackballControls to control our PerspectiveCamera
+    controls = new THREE.TrackballControls( camera );
+    controls.zoomSpeed = 0.6;
+
+    // create the new Scene in threejs
+    scene = new THREE.Scene();
+    // add an ambient light to the scene to give objects color
+    scene.add( new THREE.AmbientLight( 0x111111 ) );
+
+    // set up a light in the front of the scene
+    var light = new THREE.SpotLight( 0xdddddd, 1.5 );
+    // specific parameters of the light
+    light.position.set( 0, 500, 2000 );
+    light.castShadow = true;
+    light.shadow.camera.near = 200;
+    light.shadow.camera.far = camera.far;
+    light.shadow.camera.fov = 50;
+    light.shadow.bias = -0.00022;
+    light.shadow.mapSize.width = 2048;
+    light.shadow.mapSize.height = 2048;
+    // add the light to the scene
+    scene.add( light );
+
+    // set up a light in the back of the scene
+    var light = new THREE.SpotLight( 0xdddddd, 1.5 );
+    // specific parameters of the light source
+    light.position.set( 0, -500, -2000 );
+    light.castShadow = true;
+    light.shadow.camera.near = 200;
+    light.shadow.camera.far = camera.far;
+    light.shadow.camera.fov = 5
+    light.shadow.bias = -0.00022;
+    light.shadow.mapSize.width = 2048;
+    light.shadow.mapSize.height = 2048;
+    // add the light to the scene
+    scene.add( light );
+
+    // create a plane for the purpose of rendering and determening intersecting objects
+    plane = new THREE.Mesh(
+        new THREE.PlaneBufferGeometry( 2000, 2000, 8, 8 ),
+        new THREE.MeshBasicMaterial( { visible: false } )
+    );
+    // add plane to the scene
+    scene.add( plane );
+
+    // render an object 
+    renderer = new THREE.WebGLRenderer( { antialias: true } );
+    // change background color of renderer
+    // other specific parameters of renderer
+    renderer.setClearColor( 0xf0f0f0 );
+    renderer.setPixelRatio( window.devicePixelRatio );
+    renderer.setSize( window.innerWidth, window.innerHeight );
+    renderer.sortObjects = false;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
+
+    // add the renderer to the current HTML document
+    document.body.appendChild( renderer.domElement );
+
+    // create the axes objects for the coordinate system
+    axes = buildAxes( 10000 );
+    // add axes to the scene
+    scene.add( axes );
+
+    // add event listeners for click, press, and release of the mouse button
+    renderer.domElement.addEventListener( 'mousemove', onDocumentMouseMove, false );
+    renderer.domElement.addEventListener( 'mousedown', onDocumentMouseDown, false );
+    renderer.domElement.addEventListener( 'mouseup', onDocumentMouseUp, false );
+
+    //resize the window
+    window.addEventListener( 'resize', onWindowResize, false );
+}
+
+/* 
+* Build Axes
+* builds a coordinate system using axes
+* adapted from http://soledadpenades.com/articles/three-js-tutorials/drawing-the-coordinate-axes
+* @param length : lenght of the axis 
+* @return : the axes built
+ */
+function buildAxes( length ) {
+        var axes = new THREE.Object3D();
+        axes.add( buildAxis( new THREE.Vector3( 0, 0, 0 ), new THREE.Vector3( length, 0, 0 ), 0xFF0000, false ) ); // +X
+        axes.add( buildAxis( new THREE.Vector3( 0, 0, 0 ), new THREE.Vector3( -length, 0, 0 ), 0xFF0000, true) ); // -X
+        axes.add( buildAxis( new THREE.Vector3( 0, 0, 0 ), new THREE.Vector3( 0, length, 0 ), 0x00FF00, false ) ); // +Y
+        axes.add( buildAxis( new THREE.Vector3( 0, 0, 0 ), new THREE.Vector3( 0, -length, 0 ), 0x00FF00, true ) ); // -Y
+        axes.add( buildAxis( new THREE.Vector3( 0, 0, 0 ), new THREE.Vector3( 0, 0, length ), 0x0000FF, false ) ); // +Z
+        axes.add( buildAxis( new THREE.Vector3( 0, 0, 0 ), new THREE.Vector3( 0, 0, -length ), 0x0000FF, true ) ); // -Z
+
+        return axes;
+}
+
+/*
+* Builds an individual axis 
+* @param src: where you want the axis to start rendering 
+* @param dst: lenght of axis
+* @param colorHex: color of the axis 
+* @param dashed: boolean. Axis dashed if true
+* @return: an individual axis with all parameters set 
+ */
+function buildAxis( src, dst, colorHex, dashed ) {
+        var geom = new THREE.Geometry(),
+        mat; 
+
+        if(dashed) {
+                mat = new THREE.LineDashedMaterial({ linewidth: 3, color: colorHex, dashSize: 20, gapSize: 100 });
+        } else {
+                mat = new THREE.LineBasicMaterial({ linewidth: 3, color: colorHex });
+        }
+
+        geom.vertices.push( src.clone() );
+        geom.vertices.push( dst.clone() );
+        geom.computeLineDistances(); // This one is SUPER important, otherwise dashed lines will appear as simple plain lines
+
+        var axis = new THREE.Line( geom, mat, THREE.LineSegments );
+
+        return axis;
+}
+
+/*
+* Update parameters when window size changes 
+* 
+ */
+function onWindowResize() {
+    // change the aspect ratio to reflect window size.
+    camera.aspect = window.innerWidth / window.innerHeight;
+    // subsequent update of projection matrix
+    camera.updateProjectionMatrix();
+    // set the size of the renderer to be the full size of the window
+    renderer.setSize( window.innerWidth, window.innerHeight );
+}
+
+// when the mouse is moved
+function onDocumentMouseMove( event ) {
+    // information about the attributes of event: https://developer.mozilla.org/en-US/docs/Web/Events/mousemove
+    // IMPORTANT ATTRIBUTES
+    // clientX - The X coordinate of the mouse pointer in local (DOM content) coordinates.
+    // clientY - The Y coordinate of the mouse pointer in local (DOM content) coordinates.
+
+    EVENT = 1;
+
+    // prevent the default event from trackball controls
+    event.preventDefault();
+
+    // update mouse position x and y coordinates
+    mouse.x = ( event.clientX / window.innerWidth ) * 2 - 1;
+    mouse.y = - ( event.clientY / window.innerHeight ) * 2 + 1;
+
+    // set ray to cast from camera to mouse
+    raycaster.setFromCamera( mouse, camera );
+
+    // if you pressed the mouse down over an object
+    if ( SELECTED ) {
+        // check if the current position of the mouse intersects the plane
+        var intersects = raycaster.intersectObject( plane );
+
+        // if it does intersect the plane
+        if ( intersects.length > 0 ) {
+            // move the object 
+            SELECTED.position.copy( intersects[ 0 ].point.sub( offset ) );
+
+        }
+
+        return;
+
+    }
+    // check if any object is intersected
+    var intersects = raycaster.intersectObjects( objects );
+
+    // if mouse is over an object
+    if ( intersects.length > 0 ) {
+
+        // if the current object is not the same as
+        // the INTERSECTED object
+        if ( INTERSECTED != intersects[ 0 ].object ) {
+
+
+            // update the value of INTERSECTED
+            INTERSECTED = intersects[ 0 ].object;
+
+            // move the plane to the same position as current object
+            plane.position.copy( INTERSECTED.position );
+            plane.lookAt( camera.position );
+
+        }
+        // change the cursor style
+        container.style.cursor = 'pointer';
+
+    } else {
+
+        INTERSECTED = null;
+        container.style.cursor = 'auto';
+    }
+
+}
+
+
+
+function isObjectInArray( object, array ) {
+    var index1 = -1;
+    array.forEach( function( item, index, array1 )
+    {
+        if (this == null) {
+            return;
+        }
+        // if the object IDs are the same between the intersect
+        // the obj index is recorded
+        if( object.id == item.id ) {
+            index1 = index;
+        }
+    });
+    return index1;
+
+}
+
+function checkSelected( intersects ) {
+    if ( intersects.length > 0 ) {
+        var test = isObjectInArray( intersects[ 0 ].object, selectedObjects );
+        if ( test >= 0 ) {
+            intersects[ 0 ].object.material.emissive.setHex( 0x000000 );
+            selectedObjects.splice( test, 1 );
+        } else {
+            intersects[ 0 ].object.material.emissive.setHex( highlightedColor );
+            selectedObjects.push( intersects[ 0 ].object );
+
+        }
+    }
+
+}
+
+
+function onDocumentMouseDown( event ) {
+
+    EVENT = 0;
+
+    // prevent default TrackballControls action
+    event.preventDefault();
+
+    // update mouse position
+    mouse.x = ( event.clientX / window.innerWidth ) * 2 - 1;
+    mouse.y = - ( event.clientY / window.innerHeight ) * 2 + 1;
+
+    // send ray from camera to mouse
+    raycaster.setFromCamera( mouse, camera );
+
+    
+
+    //check if mouse intersects any objects
+    var intersects = raycaster.intersectObjects( objects );
+
+    // if it does intersect objects
+    if ( intersects.length > 0 ) {
+
+        // disable camera movement
+        controls.enabled = false;
+        // set the selected object
+        SELECTED = intersects[ 0 ].object;
+        // check where the mouse intersects the plane
+        var intersects = raycaster.intersectObject( plane );
+        // set the offset value 
+        offset.copy( intersects[ 0 ].point ).sub( plane.position );
+        // set the cursor to move style since object will be moved
+        container.style.cursor = 'move';
+
+    }
+
+}
+
+function onDocumentMouseUp( event ) {
+    // prevent default action
+    event.preventDefault();
+
+    // enable Trackball controls again
+    controls.enabled = true;
+
+    // if an object is currently intersected
+    // move the position of the plane there
+    if ( INTERSECTED ) {
+        plane.position.copy( INTERSECTED.position );
+        SELECTED = null;
+    }
+
+     // send ray from camera to mouse
+    raycaster.setFromCamera( mouse, camera );
+
+    //check if it intersects any objects
+    var intersects = raycaster.intersectObjects( objects );
+
+    // if the previous event was mouseDown
+    if ( EVENT == 0 ) {
+        // highlight the selected object
+        checkSelected( intersects );
+    }
+    
+    
+    container.style.cursor = 'auto';
+
+}
+
+function animate() {
+
+    requestAnimationFrame( animate );
+
+    render();
+    controls.update();
+    // orbitControls.update();
+
+}
+
+/*
+Render the updated scene if any changes were made.
+ */
+function render() {
+    renderer.render( scene, camera );
+}
+</script>
+
+<!-- Create all the buttons for the UI  -->
+<input type="file" id="files" name="files[]" value="tetra.off" style="position: absolute; left: 50px; top: 50px; "></input>
+<button class="coolButton" id="sphere" style="position: absolute; left: 50px; top: 75px; ">Add Sphere</button>
+<input id="sphereRadius" type="number" name="quantity" min="1" max="100" value ="16" style="position: absolute; left: 135px; top: 79px; ">
+<button class="coolButton" id="cube" style="position: absolute; left: 50px; top: 105px; ">Add Cube</button>
+<input id="cubeLength" type="number" name="quantity" min="1" max="100" value ="16" style="position: absolute; left: 135px; top: 109px; ">
+<button class="coolButton" id="plane" style="position: absolute; left: 50px; top: 135px; ">Add Plane</button>
+<button class="coolButton" id="union" style="position: absolute; left: 50px; top: 165px; ">Union</button>
+<button class="coolButton" id="intersect" style="position: absolute; left: 50px; top: 195px; ">Intersect</button>
+<button class="coolButton" id="subtract" style="position: absolute; left: 50px; top: 225px; ">Subtract</button>
+<button class="coolButton" id="removedup" style="position: absolute; left: 50px; top: 255px; ">Remove Duplicates</button>
+<button class="coolButton" id="quadsim" style="position: absolute; left: 50px; top: 285px; ">Quadric Simplification</button>
+<button class="coolButton" id="lapSmooth" style="position: absolute; left: 50px; top: 315px; ">Laplacian Smooth</button>
+<button class="coolButton" id="scale" style="position: absolute; left: 50px; top: 345px; ">Scale Object</button>
+<input id="scaleAmount" type="number" name="quantity" min="1" max="20" value ="1.5" step="0.5" style="position: absolute; left: 135px; top: 349px; ">
+<button class="coolButton" id="remove" style="position: absolute; left: 50px; top: 375px; ">Remove Object(s)</button>
+<button class="coolButton" id="rotateX" style="position: absolute; left: 50px; top: 405px; ">Rotate along X-axis</button>
+<input id="rotateXAmount" type="number" name="quantity" min="1" max="360" value ="45" step="1" style="position: absolute; left: 135px; top: 379px; ">
+<button class="coolButton" id="rotateY" style="position: absolute; left: 50px; top: 435px; ">Rotate along Y-axis</button>
+<input id="rotateYAmount" type="number" name="quantity" min="1" max="360" value ="45" step="1" style="position: absolute; left: 135px; top: 409px; ">
+<button class="coolButton" id="rotateZ" style="position: absolute; left: 50px; top: 465px; ">Rotate along Z-axis</button>
+<input id="rotateZAmount" type="number" name="quantity" min="1" max="360" value ="45" step="1" style="position: absolute; left: 135px; top: 439px; ">
+<a download="current_mesh.obj" id="downloadLink">
+<button class="coolButton" id="exportFile" style="position: absolute; left: 50px; top: 495px; ">Export as OBJ file</button>
+
+</a>
+
+<script>
+
+var mesh_leg = new Object();
+
+// create objects for each button to add event listeners
+var sphereButton = document.getElementById( "sphere" );
+var cubeButton = document.getElementById( "cube" );
+var unionButton = document.getElementById( "union" );
+var intersectButton = document.getElementById( "intersect" );
+var subtractButton = document.getElementById( "subtract" );
+var removeButton = document.getElementById( "remove" );
+var filesButton = document.getElementById( "files" );
+var quadSimButton = document.getElementById("quadsim");
+var laplSmoothButton = document.getElementById("lapSmooth");
+var scaleButton = document.getElementById("scale");
+var planeButton = document.getElementById("plane");
+var removeDupButton = document.getElementById("removedup");
+var rotateXButton = document.getElementById( "rotateX" );
+var rotateYButton = document.getElementById( "rotateY" );
+var rotateZButton = document.getElementById( "rotateZ" );
+var exportButton = document.getElementById( "exportFile" );
+var downloadLink = document.getElementById( "downloadLink" );
+
+// get the input corresponding to sphere radius
+var sphereRadiusButton = document.getElementById( "sphereRadius" );
+var cubeLengthButton = document.getElementById( "cubeLength" );
+var scaleAmountButton = document.getElementById( "scaleAmount" );
+var rotateXAmountButton = document.getElementById( "rotateXAmount" );
+var rotateYAmountButton = document.getElementById( "rotateYAmount" );
+var rotateZAmountButton = document.getElementById( "rotateZAmount" );
+
+// when sphereButton is clicked
+sphereButton.addEventListener('click', function() {
+    geometry = new THREE.SphereGeometry( sphereRadiusButton.value, 16, 16 );
+    geometry.computeFaceNormals();
+    geometry.computeVertexNormals();
+    var mat = new THREE.MeshLambertMaterial( { color: baseColor } );
+    sphere = new THREE.Mesh( geometry, mat );
+
+    objects.push( sphere );
+    scene.add( sphere )
+    render();
+})
+
+// when cubeButton is clicked
+cubeButton.addEventListener('click', function() {
+    var rand_color = Math.random() * 0xffffff;
+    var length = cubeLengthButton.value;
+    geometry = new THREE.BoxGeometry( length, length, length );
+    geometry.computeFaceNormals();
+    geometry.computeVertexNormals();
+    var mat = new THREE.MeshLambertMaterial( { color: baseColor } );
+    cube = new THREE.Mesh( geometry, mat );
+    objects.push( cube );
+    scene.add( cube );
+    render();
+})
+
+// when planeButton is clicked
+planeButton.addEventListener('click', function() {
+    var rand_color = Math.random() * 0xffffff;
+    geometry = new THREE.BoxGeometry( 0, 500, 500 );
+    geometry.computeFaceNormals();
+    geometry.computeVertexNormals();
+    var mat = new THREE.MeshLambertMaterial( { color: baseColor } );
+    cube = new THREE.Mesh( geometry, mat );
+    objects.push( cube );
+    scene.add( cube );
+    render();
+})
+
+// when unionButton is clicked
+unionButton.addEventListener('click', function() {
+    var mat = new THREE.MeshLambertMaterial( { color: baseColor } );
+    selectedObjects.forEach( function( item ) 
+    {
+        csgObjects.push( new ThreeBSP( item ) );
+    });
+    var combinedObject = csgObjects[ 0 ].union( csgObjects[ 1 ] );
+    var combinedMesh = combinedObject.toMesh( new THREE.MeshLambertMaterial( { color: baseColor } ) );
+    selectedObjects.forEach( function( item )
+    {
+        scene.remove( item );
+    });
+    combinedMesh.geometry.computeFaceNormals();
+    combinedMesh.geometry.computeVertexNormals();
+    objects.push( combinedMesh );
+    removeFromArray( objects, selectedObjects );
+    selectedObjects = [];
+    csgObjects = [];
+    scene.add( combinedMesh );
+    render();
+})
+
+// when intersectButton is clicked
+intersectButton.addEventListener('click', function() {
+    var mat = new THREE.MeshLambertMaterial( { color: baseColor } );
+    selectedObjects.forEach( function( item ) 
+    {
+        csgObjects.push( new ThreeBSP( item ) );
+    });
+    var combinedObject = csgObjects[ 0 ].intersect( csgObjects[ 1 ] );
+    var combinedMesh = combinedObject.toMesh( new THREE.MeshLambertMaterial( { color: baseColor } ) );
+    selectedObjects.forEach( function( item )
+    {
+        scene.remove( item );
+    });
+    combinedMesh.geometry.computeFaceNormals();
+    combinedMesh.geometry.computeVertexNormals();
+    objects.push( combinedMesh );
+    removeFromArray( objects, selectedObjects );
+    selectedObjects = [];
+    csgObjects = [];
+    scene.add( combinedMesh );
+    render();
+});
+
+// when subtractButton is clicked
+subtractButton.addEventListener('click', function() {
+    var mat = new THREE.MeshLambertMaterial( { color: baseColor } );
+    selectedObjects.forEach( function( item ) 
+    {
+        csgObjects.push( new ThreeBSP( item ) );
+    });
+    var combinedObject = csgObjects[ 0 ].subtract( csgObjects[ 1 ] );
+    var combinedMesh = combinedObject.toMesh( new THREE.MeshLambertMaterial( { color: baseColor } ) );
+    selectedObjects.forEach( function( item )
+    {
+        scene.remove( item );
+    });
+    combinedMesh.geometry.computeFaceNormals();
+    combinedMesh.geometry.computeVertexNormals();
+    objects.push( combinedMesh );
+    removeFromArray( objects, selectedObjects );
+    selectedObjects = [];
+    csgObjects = [];
+    scene.add( combinedMesh );
+    render();
+});
+
+// when removeButton is clicked
+removeButton.addEventListener('click', function() {
+    selectedObjects.forEach( function( item ) {
+        scene.remove( item );
+    });
+    removeFromArray( objects, selectedObjects );
+    selectedObjects = [];
+});
+
+// when filesButton is modified (file is uploaded)
+filesButton.addEventListener('change', function( evt ) {
+    var newMesh;
+    var newModule= new Module.CppMesh();
+    
+    handleFileSelect(evt, newMesh, newModule, getMesh);
+
+    function getMesh(mesh, module){
+        var meshObj = {
+            mesh: mesh,
+            module: module
+        };
+
+        //rending the normals (vertices and faces) and edges
+        //console.log("in getMesh: " + typeof mesh);
+        //var fnh = new THREE.FaceNormalsHelper( mesh, 5 );          
+        //var vnh = new THREE.VertexNormalsHelper( mesh, 5 );
+        //var edges = new THREE.EdgesHelper( mesh, 0x00ff00, .05);
+                   
+        meshes.push(meshObj);
+        objects.push(meshObj.mesh);
+        scene.add(meshObj.mesh);
+
+        //scene.add( fnh ); //scene.add( vnh ); //scene.add(edges);
+
+        var VN = meshObj.module.VN();
+        var FN = meshObj.module.FN();
+    }
+});
+
+// when scaleButton is clicked
+scaleButton.addEventListener('click', function() {
+
+     selectedObjects.forEach( function( item ) {
+        item.geometry.dynamic = true;
+        var scaleAmount = scaleAmountButton.value;
+        item.geometry.scale(scaleAmount, scaleAmount, scaleAmount);
+    });
+});
+
+// when quadSimButton is clicked
+quadSimButton.addEventListener('click', function() {
+    selectedObjects.forEach( function( item ) {
+        var resultMesh = search(item, meshes);
+        QuadricSimp(resultMesh.mesh, resultMesh.module);
+        selectedObjects = [];
+    });
+});
+
+// when LapSmooth is clicked
+laplSmoothButton.addEventListener('click', function() {
+    selectedObjects.forEach( function( item ) {
+        var resultMesh = search(item, meshes);
+        LaplSmooth(resultMesh.mesh, resultMesh.module);
+        selectedObjects = [];
+    });
+});
+
+// when removeDupButton is clicked
+removeDupButton.addEventListener('click', function (){
+    selectedObjects.forEach(function(item){
+        var resultMesh = search(item, meshes);
+        removeDupVert(resultMesh.mesh, resultMesh.module);
+        selectedObjects = [];
+    });
+});
+
+// when rotate X button is clicked
+rotateXButton.addEventListener('click', function() {
+    selectedObjects.forEach( function( item ) {
+        item.rotateX( rotateXAmountButton.value * Math.PI / 180 );
+    });
+});
+
+// when rotate Y button is clicked
+rotateYButton.addEventListener('click', function() {
+    selectedObjects.forEach( function( item ) {
+        item.rotateY( rotateYAmountButton.value * Math.PI / 180 );
+    });
+});
+
+// when rotate Z button is clicked
+rotateZButton.addEventListener('click', function() {
+    selectedObjects.forEach( function( item ) {
+        item.rotateZ( rotateZAmountButton.value * Math.PI / 180 );
+    });
+});
+
+// when export button is clicked
+exportButton.addEventListener('click', function() {
+    if (selectedObjects.length > 1) alert( "Only one mesh can be exported at a time!" );
+    downloadLink.href = exportOBJ( selectedObjects[ 0 ] );
+    downloadLink.style.display = 'block';
+});
+
+
+/**
+ * Removes an object from an array of objects.
+ * In-place modification.
+ * @param orig: the original array to be modified
+ * @param remove: Mesh object to be removed
+ */
+function removeFromArray( orig, remove ) {
+    for (i = 0; i < remove.length; i++) {
+        for (j = 0; j < orig.length; j++) {
+            if (remove[i].id == orig[j].id) orig.splice( j, 1 );
+        }
+    }
+}
+
+/**
+ * Search a given array for a given object.
+ * @param nameKey [the key of the object to search for]
+ * @param myArray [the array to serach in]
+ * @return {[type]}         [object if it is found]
+ */
+function search(nameKey, myArray){
+    for (var i=0; i < myArray.length; i++) {
+        if (myArray[i].mesh === nameKey) {
+            return myArray[i];
+        }
+    }
+}
+
+
+
+</script>
+</body>
+
+</html>
+
